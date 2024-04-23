@@ -1,0 +1,51 @@
+name: 'Deploy Prod'
+on:
+  push:
+    branches:
+      - 'main'
+  release:
+    types: [published]
+env:
+    VERSION: v.1.0.0 # ${{ github.ref }}
+    SAM_BUCKET: mentor-prod-sam-deployment
+    STACK_NAME: test-cognito-backup-mentorlive
+    FOLDER: cognito_backup
+jobs:
+  build:
+    name: 'Build'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: 'Checkout'
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::389658267689:role/GitHubAccessRole
+          role-duration-seconds: 3600
+          aws-region: eu-west-2
+
+      - name: Build
+        run: |
+            chmod +x ./build-s3-dist.sh
+            ./build-s3-dist.sh ${{ env.SAM_BUCKET}} ${{ env.FOLDER }} ${{ env.VERSION }}
+        working-directory: ./deployment
+
+      - name: Upload to S3
+        uses: rbs-path/aws-github-actions/s3_sync@master
+        with:
+          local-path: regional-s3-assets/
+          bucket-name: ${{ env.SAM_BUCKET}}
+          path-prefix: ${{ env.FOLDER }}/${{ env.VERSION }}/
+
+      - name: Deploy to AWS CloudFormation
+        uses: aws-actions/aws-cloudformation-github-deploy@v1
+        with:
+          name: ${{ env.STACK_NAME }}
+          template: https://s3.amazonaws.com/${{ env.SAM_BUCKET}}/${{ env.FOLDER }}/${{ env.VERSION }}/cognito-user-profiles-export-reference-architecture.yaml
+          # parameter-overrides: "MyParam1=myValue,MyParam2=${{ secrets.MY_SECRET_VALUE }}"
